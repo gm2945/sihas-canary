@@ -106,6 +106,7 @@ PMM_KEY_VOLTAGE: Final = "voltage"
 PMM_KEY_CURRENT: Final = "current"
 PMM_KEY_POWER_FACTOR: Final = "power_factor"
 PMM_KEY_FREQUENCY: Final = "frequency"
+PMM_MAG_TABLE = {0: 10, 1: 100, 2: 1000}
 
 
 @dataclass
@@ -120,12 +121,19 @@ def as_killo_watt(watt: int) -> float:
     return round(watt / 1000, 2)
 
 def this_month_value_handler(registers: List[int]) -> float:
-    mag = 10 if not registers[31] else 100
-    return as_killo_watt(registers[10] * mag + registers[16])
+    try:
+        mag = PMM_MAG_TABLE[registers[31]]
+        return as_killo_watt(registers[10] * mag + registers[16])
+    except IndexError as e:
+        raise ValueError(f"PMM-300 월간 사용량 배율을 해석하지 못했습니다.") from e
+
 
 def last_month_value_handler(registers: List[int]) -> float:
-    mag = 10 if not registers[31] else 100
-    return as_killo_watt(registers[11] * mag)
+    try:
+        mag = PMM_MAG_TABLE[registers[31]]
+        return as_killo_watt(registers[11] * mag)
+    except IndexError as e:
+        raise ValueError(f"PMM-300 월간 사용량 배율을 해석하지 못했습니다.") from e
 
 PMM_GENERIC_SENSOR_DEFINE: Final = {
     PMM_KEY_POWER: PmmConfig(
