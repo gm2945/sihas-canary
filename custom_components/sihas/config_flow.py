@@ -10,7 +10,7 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from .bcm import CONF_BCM_NR10E
+from .bcm import CONF_BCM_NR10E, CONF_BCM_PRESET_CONTROL
 from homeassistant.helpers.service_info import dhcp, zeroconf
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.exceptions import HomeAssistantError
@@ -221,5 +221,6 @@ class SihasOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema({
                 vol.Required(CONF_BCM_NR10E, default=self._entry.options.get(CONF_BCM_NR10E, False)): bool,
+                vol.Required(CONF_BCM_PRESET_CONTROL, default=self._entry.options.get(CONF_BCM_PRESET_CONTROL, False)): bool,
             }),
         )

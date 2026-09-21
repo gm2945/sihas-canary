@@ -18,6 +18,7 @@ from custom_components.sihas.bcm import (
     AWAY,
     BURNING,
     CONF_BCM_NR10E,
+    CONF_BCM_PRESET_CONTROL,
     CONNECTIVITY,
     HOT_WATER_TARGET,
     ONDOL_TARGET,
@@ -29,6 +30,7 @@ from custom_components.sihas.bcm import (
     WATER_STATUS,
     BcmCoordinator,
     operation_mode,
+    preset_command,
 )
 from custom_components.sihas.bcm_climate import Bcm300
 from custom_components.sihas.binary_sensor import BcmStatus
@@ -189,17 +191,20 @@ async def test_turn_on_and_independent_controls_preserve_other_settings(setup):
 
 
 @pytest.mark.asyncio
-async def test_legacy_hvac_commands(setup):
+async def test_hvac_modes_only_control_power(setup):
     _, _, _, device, climate = setup
+    device.regs[AWAY] = device.regs[SCHEDULE] = 1
+    assert climate.hvac_modes == [HVACMode.OFF, HVACMode.HEAT]
     await climate.async_set_hvac_mode(HVACMode.HEAT)
-    assert device.writes == [(SCHEDULE, 1)]
+    assert device.writes == [(POWER, 1)]
     assert climate.hvac_mode == HVACMode.HEAT
-    await climate.async_set_hvac_mode(HVACMode.AUTO)
-    assert device.writes[-1] == (SCHEDULE, 0)
-    await climate.async_set_hvac_mode(HVACMode.FAN_ONLY)
-    assert device.writes[-1] == (AWAY, 1)
-    await climate.async_turn_off()
+    for legacy in (HVACMode.AUTO, HVACMode.FAN_ONLY):
+        with pytest.raises(HomeAssistantError):
+            await climate.async_set_hvac_mode(legacy)
+    await climate.async_set_hvac_mode(HVACMode.OFF)
     assert climate.hvac_mode == HVACMode.OFF
+    assert device.writes == [(POWER, 1), (POWER, 0)]
+    assert device.regs[AWAY] == device.regs[SCHEDULE] == 1
 
 
 @pytest.mark.asyncio
@@ -305,10 +310,84 @@ async def test_nr10e_options_form_and_save(setup):
     flow.hass = hass
     result = await flow.async_step_init()
     assert result["type"] == "form"
-    assert result["data_schema"]({}) == {CONF_BCM_NR10E: True}
+    assert result["data_schema"]({}) == {
+        CONF_BCM_NR10E: True,
+        CONF_BCM_PRESET_CONTROL: False,
+    }
     result = await flow.async_step_init({CONF_BCM_NR10E: False})
     assert result["type"] == "create_entry"
     assert result["data"] == {CONF_BCM_NR10E: False}
+
+
+@pytest.mark.parametrize("preset", ["실내", "온돌", "온수"])
+@pytest.mark.parametrize("raw", [0, 1, 2, 3, 5, 6, 7, 0xAD03])
+def test_experimental_preset_masks_preserve_other_bits(preset, raw):
+    registers = [0] * 64
+    registers[OPERATION_MODE] = raw
+    register, value = preset_command(registers, preset)[0]
+    assert register == OPERATION_MODE
+    assert value & ~7 == raw & ~7
+    if preset == "온수":
+        assert value & 4 == raw & 4  # remember heating type
+    else:
+        assert value & 1 == raw & 1  # preserve DHW enable
+    registers[OPERATION_MODE] = value
+    assert operation_mode(registers) == preset
+
+
+@pytest.mark.asyncio
+async def test_presets_require_opt_in_and_invalid_presets_write_nothing(setup):
+    _, _, coordinator, device, climate = setup
+    assert climate.preset_modes is None
+    with pytest.raises(HomeAssistantError):
+        await climate.async_set_preset_mode("실내")
+    coordinator.preset_control = True
+    with pytest.raises(HomeAssistantError):
+        await climate.async_set_preset_mode("invalid")
+    # Even with the experiment enabled, raw R4 writes are not accepted.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_write(OPERATION_MODE, 7)
+    assert device.writes == []
+
+
+@pytest.mark.asyncio
+async def test_preset_ui_and_temperature_controls_follow_device_mode(setup):
+    _, _, coordinator, device, climate = setup
+    coordinator.preset_control = True
+    device.regs[POWER] = 0
+    device.regs[AWAY] = device.regs[SCHEDULE] = 1
+    assert climate.capability_attributes["preset_modes"] == ["실내", "온돌", "온수"]
+    assert climate.supported_features & ClimateEntityFeature.PRESET_MODE
+    for preset, temperature, target_register in [
+        ("온돌", 55, ONDOL_TARGET),
+        ("실내", 25, ROOM_TARGET),
+    ]:
+        await climate.async_set_preset_mode(preset)
+        assert climate.state_attributes["preset_mode"] == preset
+        assert climate.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE
+        await climate.async_set_temperature(temperature=temperature)
+        assert climate.state_attributes["temperature"] == temperature
+        assert device.writes[-1] == (target_register, temperature)
+    await climate.async_set_preset_mode("온수")
+    assert climate.state_attributes["preset_mode"] == "온수"
+    assert "temperature" not in climate.state_attributes
+    assert not climate.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE
+    await climate.async_set_preset_mode("실내")
+    assert climate.state_attributes["temperature"] == 25
+    assert device.regs[POWER] == 0
+    assert device.regs[AWAY] == device.regs[SCHEDULE] == 1
+
+
+@pytest.mark.asyncio
+async def test_ignored_preset_reports_error_without_optimistic_state(setup):
+    _, _, coordinator, device, climate = setup
+    coordinator.preset_control = True
+    device.apply_writes = False
+    with pytest.raises(HomeAssistantError, match="반영하지 않았습니다"):
+        await climate.async_set_preset_mode("온돌")
+    assert climate.preset_mode == "실내"
+    assert climate.available
+    assert device.writes == [(OPERATION_MODE, 7)]
 
 
 @pytest.mark.asyncio

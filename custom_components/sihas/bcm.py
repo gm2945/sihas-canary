@@ -20,6 +20,8 @@ from .sihas_base import SihasBase
 
 _LOGGER = logging.getLogger(__name__)
 CONF_BCM_NR10E = "bcm_nr10e"
+CONF_BCM_PRESET_CONTROL = "bcm_preset_control"
+PRESET_MODES = ("실내", "온돌", "온수")
 
 POWER = 0
 ROOM_TARGET = 1
@@ -44,6 +46,24 @@ def operation_mode(registers: list[int]) -> str | None:
     if value & 1:
         return "온수"
     return None
+
+
+def preset_command(registers: list[int], preset: str):
+    """Experimental inverse of upstream's R4 decoder, not a verified write API.
+
+    Preserve unrelated bits, DHW enable during heating, and the last heating
+    type while selecting hot-water-only. Never change power or temperatures.
+    """
+    value = registers[OPERATION_MODE]
+    if preset == "실내":
+        value = (value & ~6) | 2
+    elif preset == "온돌":
+        value |= 6
+    elif preset == "온수":
+        value = (value & ~2) | 1
+    else:
+        raise HomeAssistantError("지원하지 않는 프리셋입니다.")
+    return [(OPERATION_MODE, value)]
 
 
 def temperature_command(registers: list[int], temperature: float, nr10e: bool):
@@ -77,6 +97,7 @@ class BcmCoordinator(DataUpdateCoordinator):
         )
         self.entry = entry
         self.nr10e = entry.options.get(CONF_BCM_NR10E, False)
+        self.preset_control = entry.options.get(CONF_BCM_PRESET_CONTROL, False)
         self.api = SihasBase(
             entry.data[CONF_IP],
             entry.data[CONF_MAC],
@@ -95,7 +116,7 @@ class BcmCoordinator(DataUpdateCoordinator):
         async with self._lock:
             return await self._read()
 
-    async def async_control(self, build_commands: Callable):
+    async def async_control(self, build_commands: Callable, *, expected_preset=None):
         """Read, validate, write and read back; do not report optimistic success."""
         async with self._lock:
             try:
@@ -115,8 +136,14 @@ class BcmCoordinator(DataUpdateCoordinator):
                         if not self.nr10e:
                             limits = (0, 80)
                         valid = limits[0] <= value <= limits[1]
+                    elif register == OPERATION_MODE:
+                        valid = (
+                            self.preset_control
+                            and expected_preset in PRESET_MODES
+                            and commands == preset_command(registers, expected_preset)
+                        )
                     else:
-                        valid = False  # R4 and undocumented registers are not writable here.
+                        valid = False
                     if not isinstance(value, int) or not valid:
                         raise HomeAssistantError("지원하지 않는 BCM 설정값입니다.")
                 for index, (register, value) in enumerate(commands):
@@ -126,13 +153,38 @@ class BcmCoordinator(DataUpdateCoordinator):
                         self.api.command, register, value
                     ):
                         raise UpdateFailed(f"BCM R{register} 명령 전송에 실패했습니다.")
-                self.async_set_updated_data(await self._read())
+                actual = await self._read()
+                self.async_set_updated_data(actual)
+                if expected_preset is not None:
+                    # Some controllers apply commands after acknowledging the packet.
+                    for _ in range(3):
+                        if operation_mode(actual) == expected_preset:
+                            break
+                        await asyncio.sleep(1)
+                        actual = await self._read()
+                        self.async_set_updated_data(actual)
+                    if operation_mode(actual) != expected_preset:
+                        raise HomeAssistantError(
+                            "보일러가 프리셋 변경을 반영하지 않았습니다. "
+                            "이 펌웨어의 모드 쓰기 지원은 확인되지 않았습니다. "
+                            "시하스 앱에서 모드를 변경하고 진단 정보를 확인하세요."
+                        )
             except UpdateFailed as err:
                 self.async_set_update_error(err)
                 raise HomeAssistantError(str(err)) from err
 
     async def async_write(self, register: int, value: int):
         await self.async_control(lambda registers: [(register, value)])
+
+    async def async_set_preset(self, preset: str):
+        if not self.preset_control:
+            raise HomeAssistantError("BCM 구성에서 시험 기능인 프리셋 전환을 켜세요.")
+        if preset not in PRESET_MODES:
+            raise HomeAssistantError("지원하지 않는 프리셋입니다.")
+        await self.async_control(
+            lambda registers: preset_command(registers, preset),
+            expected_preset=preset,
+        )
 
 
 class BcmEntity(CoordinatorEntity):

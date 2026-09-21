@@ -16,6 +16,7 @@ from .bcm import (
     ONDOL_TEMPERATURE,
     OPERATION_MODE,
     POWER,
+    PRESET_MODES,
     ROOM_TARGET,
     ROOM_TEMPERATURE,
     SCHEDULE,
@@ -29,8 +30,8 @@ class Bcm300(BcmEntity, ClimateEntity):
     _attr_icon = "mdi:thermostat"
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_target_temperature_step = 1
-    # Keep the upstream modes so existing automations keep working.
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.FAN_ONLY, HVACMode.AUTO]
+    # HA has no HVACMode.ON: HEAT represents powered on, independently of preset.
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
 
     def __init__(self, coordinator):
         super().__init__(coordinator, None, None)
@@ -40,13 +41,18 @@ class Bcm300(BcmEntity, ClimateEntity):
         features = ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
         if self.preset_mode in ("실내", "온돌"):
             features |= ClimateEntityFeature.TARGET_TEMPERATURE
-        # PRESET_MODE is deliberately absent until mode writes are verified.
+        if self.coordinator.preset_control:
+            features |= ClimateEntityFeature.PRESET_MODE
         return features
 
     @property
     def preset_mode(self):
-        """Read-only observed mode; no undocumented R4 writes."""
+        """Always report the mode observed on the device."""
         return operation_mode(self.registers)
+
+    @property
+    def preset_modes(self):
+        return list(PRESET_MODES) if self.coordinator.preset_control else None
 
     @property
     def current_temperature(self):
@@ -80,11 +86,7 @@ class Bcm300(BcmEntity, ClimateEntity):
     def hvac_mode(self):
         if self.registers[POWER] == 0:
             return HVACMode.OFF
-        if self.registers[SCHEDULE] == 1:
-            return HVACMode.HEAT
-        if self.registers[AWAY] == 1:
-            return HVACMode.FAN_ONLY
-        return HVACMode.AUTO
+        return HVACMode.HEAT if self.registers[POWER] == 1 else None
 
     @property
     def hvac_action(self):
@@ -101,7 +103,8 @@ class Bcm300(BcmEntity, ClimateEntity):
             **super().extra_state_attributes,
             "preset_mode": self.preset_mode,
             "operation_mode_raw": self.registers[OPERATION_MODE],
-            "operation_mode_read_only": True,
+            "operation_mode_read_only": not self.coordinator.preset_control,
+            "preset_control_experimental": self.coordinator.preset_control,
             "away": self.registers[AWAY] == 1,
             "schedule": self.registers[SCHEDULE] == 1,
             "burning": {0: False, 1: True}.get(self.registers[BURNING]),
@@ -126,17 +129,11 @@ class Bcm300(BcmEntity, ClimateEntity):
         )
 
     async def async_set_hvac_mode(self, hvac_mode):
-        def build(registers):
-            if hvac_mode == HVACMode.OFF:
-                return [(POWER, 0)]
-            if hvac_mode not in self.hvac_modes:
-                raise HomeAssistantError("지원하지 않는 운전 모드입니다.")
-            commands = [] if registers[POWER] == 1 else [(POWER, 1)]
-            if hvac_mode == HVACMode.FAN_ONLY:
-                return commands + [(AWAY, 1)]
-            if registers[AWAY] != 0:
-                commands.append((AWAY, 0))
-            commands.append((SCHEDULE, 1 if hvac_mode == HVACMode.HEAT else 0))
-            return commands
+        if hvac_mode not in self.hvac_modes:
+            raise HomeAssistantError(
+                "지원하지 않는 모드입니다. 외출과 예약은 별도 엔티티를 사용하세요."
+            )
+        await self.coordinator.async_write(POWER, 0 if hvac_mode == HVACMode.OFF else 1)
 
-        await self.coordinator.async_control(build)
+    async def async_set_preset_mode(self, preset_mode):
+        await self.coordinator.async_set_preset(preset_mode)
