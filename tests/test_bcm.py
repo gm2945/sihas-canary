@@ -66,7 +66,7 @@ class Device:
 
 
 @pytest_asyncio.fixture
-async def setup(tmp_path):
+async def setup(tmp_path, request):
     hass = HomeAssistant(str(tmp_path))
     entry = ConfigEntry(
         entry_id="bcm-test",
@@ -78,7 +78,9 @@ async def setup(tmp_path):
         unique_id="bcm-test",
         discovery_keys=MappingProxyType({}),
         subentries_data=[],
-        options={CONF_BCM_NR10E: True},
+        options=getattr(
+            request, "param", {CONF_BCM_NR10E: True, CONF_BCM_PRESET_CONTROL: False}
+        ),
         data={
             "ip": "192.0.2.1",
             "mac": "00:11:22:33:44:55",
@@ -316,7 +318,45 @@ async def test_nr10e_options_form_and_save(setup):
     }
     result = await flow.async_step_init({CONF_BCM_NR10E: False})
     assert result["type"] == "create_entry"
-    assert result["data"] == {CONF_BCM_NR10E: False}
+    assert result["data"] == {CONF_BCM_NR10E: False, CONF_BCM_PRESET_CONTROL: False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "setup,expected_nr10e,expected_presets",
+    [
+        ({}, True, True),
+        ({CONF_BCM_NR10E: False}, False, True),
+        ({CONF_BCM_PRESET_CONTROL: False}, True, False),
+        ({CONF_BCM_NR10E: False, CONF_BCM_PRESET_CONTROL: False}, False, False),
+    ],
+    indirect=["setup"],
+)
+async def test_default_controls_visible_and_explicit_disables_preserved(
+    setup, expected_nr10e, expected_presets
+):
+    hass, entry, coordinator, device, boiler = setup
+    entities = []
+    await select.async_setup_entry(hass, entry, entities.extend)
+    hot_water = [
+        entity for entity in entities if entity.unique_id.endswith("-hot_water_level")
+    ]
+    assert bool(hot_water) is expected_nr10e
+    assert (
+        bool(boiler.supported_features & ClimateEntityFeature.PRESET_MODE)
+        is expected_presets
+    )
+    if expected_presets:
+        assert boiler.capability_attributes["preset_modes"] == ["실내", "온돌", "온수"]
+    flow = ConfigFlow.async_get_options_flow(entry)
+    flow.hass = hass
+    form = await flow.async_step_init()
+    assert form["data_schema"]({}) == {
+        CONF_BCM_NR10E: expected_nr10e,
+        CONF_BCM_PRESET_CONTROL: expected_presets,
+    }
+    # Exposing controls must not send commands to the boiler at startup.
+    assert device.writes == []
 
 
 @pytest.mark.parametrize("preset", ["실내", "온돌", "온수"])

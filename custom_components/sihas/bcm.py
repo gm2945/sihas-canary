@@ -21,6 +21,8 @@ from .sihas_base import SihasBase
 _LOGGER = logging.getLogger(__name__)
 CONF_BCM_NR10E = "bcm_nr10e"
 CONF_BCM_PRESET_CONTROL = "bcm_preset_control"
+DEFAULT_BCM_NR10E = True
+DEFAULT_BCM_PRESET_CONTROL = True
 PRESET_MODES = ("실내", "온돌", "온수")
 
 POWER = 0
@@ -49,7 +51,7 @@ def operation_mode(registers: list[int]) -> str | None:
 
 
 def preset_command(registers: list[int], preset: str):
-    """Experimental inverse of upstream's R4 decoder, not a verified write API.
+    """Inverse of upstream's R4 decoder, user-tested with BCM-300W / NR-10E.
 
     Preserve unrelated bits, DHW enable during heating, and the last heating
     type while selecting hot-water-only. Never change power or temperatures.
@@ -96,8 +98,10 @@ class BcmCoordinator(DataUpdateCoordinator):
             always_update=False,
         )
         self.entry = entry
-        self.nr10e = entry.options.get(CONF_BCM_NR10E, False)
-        self.preset_control = entry.options.get(CONF_BCM_PRESET_CONTROL, False)
+        self.nr10e = entry.options.get(CONF_BCM_NR10E, DEFAULT_BCM_NR10E)
+        self.preset_control = entry.options.get(
+            CONF_BCM_PRESET_CONTROL, DEFAULT_BCM_PRESET_CONTROL
+        )
         self.api = SihasBase(
             entry.data[CONF_IP],
             entry.data[CONF_MAC],
@@ -178,7 +182,7 @@ class BcmCoordinator(DataUpdateCoordinator):
 
     async def async_set_preset(self, preset: str):
         if not self.preset_control:
-            raise HomeAssistantError("BCM 구성에서 시험 기능인 프리셋 전환을 켜세요.")
+            raise HomeAssistantError("BCM 구성에서 프리셋 전환을 켜세요.")
         if preset not in PRESET_MODES:
             raise HomeAssistantError("지원하지 않는 프리셋입니다.")
         await self.async_control(

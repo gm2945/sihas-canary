@@ -22,7 +22,7 @@
     "step": {
       "init": {
         "title": "BCM controller settings",
-        "description": "Operation was confirmed by a user with BCM-300W and Kyungdong NR-10E. The NR-10E option enables three hot-water levels and room 10–40 °C / ondol 40–80 °C limits. Enable presets to select room/ondol/hot water in climate. Other controllers and firmware versions require separate validation.",
+        "description": "Presets and NR-10E three-level hot water are enabled by default. Explicitly saved settings are preserved. A user confirmed operation with BCM-300W and Kyungdong NR-10E. Disable the NR-10E option for other controllers. The profile uses room 10–40 °C, ondol 40–80 °C and low/medium/high hot-water levels.",
         "data": {
           "bcm_nr10e": "Kyungdong NR-10E three-level hot water",
           "bcm_preset_control": "Room/ondol/hot-water presets"
