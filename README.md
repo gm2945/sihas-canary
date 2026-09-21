@@ -26,3 +26,10 @@
 > 해당 방법은 버전 컴포넌트 버전 [`v1.3.3`](https://github.com/cmsong-shina/sihas-canary/releases/tag/v1.3.3)까지 지원합니다.
 
 <br>
+
+
+## BCM-300 확장 (gm2945 포크)
+
+전원·온도 제어, 온수 3단계(NR-10E 옵션), 재실/외출, 예약, 연소·오류·연결·물 상태를 제공합니다.
+운전모드 전환과 난방세기 쓰기는 아직 지원하지 않습니다.
+설치 및 검증 범위는 [BCM-300 안내](custom_components/sihas/docs/BCM300.md)를 확인하세요.

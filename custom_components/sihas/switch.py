@@ -23,6 +23,8 @@ from .const import (
 from .packet_builder import packet_builder
 from .sender import send
 from .sihas_base import SihasEntity
+from .bcm import BcmEntity, SCHEDULE
+from .const import DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=5)
 
@@ -40,7 +42,9 @@ PLATFORM_SCHEMA = SIHAS_PLATFORM_SCHEMA
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    if entry.data[CONF_TYPE] == "CCM":
+    if entry.data[CONF_TYPE] == "BCM":
+        async_add_entities([BcmSchedule(hass.data[DOMAIN][entry.entry_id], "schedule", "예약")])
+    elif entry.data[CONF_TYPE] == "CCM":
         async_add_entities(
             [
                 Ccm300(
@@ -92,3 +96,18 @@ class Ccm300(SihasEntity, SwitchEntity):
             self._attributes[SensorDeviceClass.CURRENT] = round(regs[CCM_REG_CUR_A] * 0.001, 3)
             self._attributes[SensorDeviceClass.POWER] = round(regs[CCM_REG_CUR_W] * 0.1, 3)
             self._attributes[SensorDeviceClass.POWER_FACTOR] = round(regs[CCM_REG_CUR_PF] * 0.1, 3)
+
+
+
+class BcmSchedule(BcmEntity, SwitchEntity):
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def is_on(self):
+        return {0: False, 1: True}.get(self.registers[SCHEDULE])
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_write(SCHEDULE, 1)
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_write(SCHEDULE, 0)

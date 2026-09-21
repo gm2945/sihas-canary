@@ -17,5 +17,19 @@
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "BCM controller settings",
+        "description": "Enable only when the SiHAS app controller model is Kyungdong NR-10E. Uses hot-water levels 0/1/2, room limits 10–40 °C and ondol limits 40–80 °C.",
+        "data": {
+          "bcm_nr10e": "Kyungdong NR-10E three-level hot water"
+        }
+      }
+    },
+    "abort": {
+      "no_options": "No additional options for this device."
+    }
   }
 }

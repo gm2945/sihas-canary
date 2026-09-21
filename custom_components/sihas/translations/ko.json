@@ -1,33 +1,47 @@
 {
-    "config": {
-        "abort": {
-            "already_configured": "이미 등록된 장치입니다."
+  "config": {
+    "abort": {
+      "already_configured": "이미 등록된 장치입니다."
+    },
+    "error": {
+      "cannot_connect": "연결 실패",
+      "invalid_auth": "인증 실패",
+      "unknown": "알 수 없는 오류"
+    },
+    "flow_title": "{type} {mac}",
+    "step": {
+      "user": {
+        "data": {
+          "ip": "아이피(고정IP)",
+          "mac": "맥 주소",
+          "type": "장치 타입",
+          "cfg": "컨피그(앱에서 확인)",
+          "name": "장치 이름"
         },
-        "error": {
-            "cannot_connect": "연결 실패",
-            "invalid_auth": "인증 실패",
-            "unknown": "알 수 없는 오류"
+        "description": "수동으로 장치를 추가합니다.\n이 단계를 진행하기 전에 장치에 고정 IP를 부여하십시오.",
+        "title": "새로운 시하스 장치"
+      },
+      "zeroconf_confirm": {
+        "data": {
+          "name": "장치 이름"
         },
-        "flow_title": "{type} {mac}",
-        "step": {
-            "user": {
-                "data": {
-                    "ip": "아이피(고정IP)",
-                    "mac": "맥 주소",
-                    "type": "장치 타입",
-                    "cfg": "컨피그(앱에서 확인)",
-                    "name": "장치 이름"
-                },
-                "description": "수동으로 장치를 추가합니다.\n이 단계를 진행하기 전에 장치에 고정 IP를 부여하십시오.",
-                "title": "새로운 시하스 장치"
-            },
-            "zeroconf_confirm": {
-                "data": {
-                    "name": "장치 이름"
-                },
-                "description": "모델: {type}\n맥주소: {mac}",
-                "title": "새로운 시하스 장치"
-            }
-        }
+        "description": "모델: {type}\n맥주소: {mac}",
+        "title": "새로운 시하스 장치"
+      }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "BCM 조절기 설정",
+        "description": "시하스 앱의 조절기 모델이 경동 NR-10E일 때만 활성화하세요. 온수 0/1/2 단계와 실내 10–40 °C, 온돌 40–80 °C 범위를 적용합니다.",
+        "data": {
+          "bcm_nr10e": "경동 NR-10E 온수 3단계 사용"
+        }
+      }
+    },
+    "abort": {
+      "no_options": "이 장치의 추가 설정은 없습니다."
+    }
+  }
 }

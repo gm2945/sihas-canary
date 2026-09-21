@@ -1,33 +1,47 @@
 {
-    "config": {
-        "abort": {
-            "already_configured": "Device is already configured"
+  "config": {
+    "abort": {
+      "already_configured": "Device is already configured"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "flow_title": "{type} {mac}",
+    "step": {
+      "user": {
+        "data": {
+          "ip": "IP",
+          "mac": "MAC",
+          "type": "Type",
+          "cfg": "Config",
+          "name": "Name of device"
         },
-        "error": {
-            "cannot_connect": "Failed to connect",
-            "invalid_auth": "Invalid authentication",
-            "unknown": "Unexpected error"
+        "description": "Manually setting-up device.\nSet static IP to device before next step.",
+        "title": "Add SiHAS Device"
+      },
+      "zeroconf_confirm": {
+        "data": {
+          "name": "Name of device"
         },
-        "flow_title": "{type} {mac}",
-        "step": {
-            "user": {
-                "data": {
-                    "ip": "IP",
-                    "mac": "MAC",
-                    "type": "Type",
-                    "cfg": "Config",
-                    "name": "Name of device"
-                },
-                "description": "Manually setting-up device.\nSet static IP to device before next step.",
-                "title": "Add SiHAS Device"
-            },
-            "zeroconf_confirm": {
-                "data": {
-                    "name": "Name of device"
-                },
-                "description": "Type: {type}\nMac: {mac}",
-                "title": "Add SiHAS Device"
-            }
-        }
+        "description": "Type: {type}\nMac: {mac}",
+        "title": "Add SiHAS Device"
+      }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "BCM controller settings",
+        "description": "Enable only when the SiHAS app controller model is Kyungdong NR-10E. Uses hot-water levels 0/1/2, room limits 10–40 °C and ondol limits 40–80 °C.",
+        "data": {
+          "bcm_nr10e": "Kyungdong NR-10E three-level hot water"
+        }
+      }
+    },
+    "abort": {
+      "no_options": "No additional options for this device."
+    }
+  }
 }

@@ -11,6 +11,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .climate import Acm300
+from .bcm import BcmEntity, BURNING, PROBLEM, CONNECTIVITY
+from .const import DOMAIN
 
 from .const import (
     CONF_CFG,
@@ -33,7 +35,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    if entry.data[CONF_TYPE] == "ACM":
+    if entry.data[CONF_TYPE] == "BCM":
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        async_add_entities([
+            BcmStatus(coordinator, "burning", "연소", BURNING, None),
+            BcmStatus(coordinator, "problem", "이상", PROBLEM, BinarySensorDeviceClass.PROBLEM),
+            BcmStatus(coordinator, "connectivity", "보일러 연결", CONNECTIVITY, BinarySensorDeviceClass.CONNECTIVITY),
+        ])
+    elif entry.data[CONF_TYPE] == "ACM":
         async_add_entities(
             [
                 AcmVibrationSensor(
@@ -68,3 +77,32 @@ class AcmVibrationSensor(SihasEntity, BinarySensorEntity):
     def update(self):
         if regs := self.poll():            
             self._attr_is_on = regs[7] != 0
+
+
+class BcmStatus(BcmEntity, BinarySensorEntity):
+    def __init__(self, coordinator, suffix, label, register, device_class):
+        super().__init__(coordinator, suffix, label)
+        self.register = register
+        self._attr_device_class = device_class
+        if register == BURNING:
+            self._attr_icon = "mdi:fire"
+
+    @property
+    def available(self):
+        # Connectivity stays readable while the BCM reports a disconnected boiler.
+        if self.register == CONNECTIVITY:
+            return self.coordinator.last_update_success and self.registers is not None
+        return super().available
+
+    @property
+    def is_on(self):
+        value = self.registers[self.register]
+        if self.register == PROBLEM:
+            return value != 0
+        if self.register == CONNECTIVITY:
+            return {0: True, 1: False}.get(value)
+        return {0: False, 1: True}.get(value)
+
+    @property
+    def extra_state_attributes(self):
+        return {**super().extra_state_attributes, "raw_value": self.registers[self.register]}

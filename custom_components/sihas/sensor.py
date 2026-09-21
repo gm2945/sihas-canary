@@ -39,6 +39,8 @@ from .const import (
 )
 from .sihas_base import SihasEntity, SihasProxy, SihasSubEntity
 from .util import register_put_u32
+from .bcm import BcmEntity, WATER_STATUS, ROOM_TEMPERATURE
+from .const import DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=10)
 
@@ -206,6 +208,13 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     match entry.data[CONF_TYPE]:
+        case "BCM":
+            coordinator = hass.data[DOMAIN][entry.entry_id]
+            async_add_entities([
+                BcmWaterStatus(coordinator, "water_status", "물 상태"),
+                BcmRoomTemperature(coordinator, "room_temperature", "실내온도"),
+            ])
+
         case "PMM":
             pmm = Pmm300(
                 ip=entry.data[CONF_IP],
@@ -372,3 +381,29 @@ class HqmHumidSensor(SihasEntity, SensorEntity):
     def update(self):
         if regs := self.poll():            
             self._attr_native_value = regs[7]
+
+
+class BcmWaterStatus(BcmEntity, SensorEntity):
+    _attr_icon = "mdi:water-check"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["충분", "부족"]
+
+    @property
+    def native_value(self):
+        # No documented mapping for an additional abnormal/pressure state.
+        return {0: "충분", 1: "부족"}.get(self.registers[WATER_STATUS])
+
+    @property
+    def extra_state_attributes(self):
+        return {**super().extra_state_attributes, "raw_value": self.registers[WATER_STATUS]}
+
+
+class BcmRoomTemperature(BcmEntity, SensorEntity):
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    @property
+    def native_value(self):
+        value = self.registers[ROOM_TEMPERATURE]
+        return value / 10 if 0 <= value <= 1000 else None

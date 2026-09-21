@@ -1,0 +1,4 @@
+# Tested with Python 3.14. These packages are for development, not HA installation.
+homeassistant==2026.9.3
+pytest==9.1.1
+pytest-asyncio==1.4.0
