@@ -35,8 +35,8 @@ from custom_components.sihas.bcm import (
 from custom_components.sihas.bcm_climate import Bcm300
 from custom_components.sihas.binary_sensor import BcmStatus
 from custom_components.sihas.sensor import BcmWaterStatus
-from custom_components.sihas.select import BcmSelect
-from custom_components.sihas.switch import BcmSchedule
+from custom_components.sihas.select import BcmOperationMode, BcmSelect
+from custom_components.sihas.switch import BcmPower, BcmSchedule
 from custom_components.sihas import binary_sensor, climate, select, sensor, switch
 from custom_components.sihas.diagnostics import async_get_config_entry_diagnostics
 from custom_components.sihas.config_flow import ConfigFlow
@@ -279,8 +279,8 @@ async def test_platform_setup_shared_snapshot_and_profile_gate(setup):
     entities = []
     for platform in (climate, select, switch, sensor, binary_sensor):
         await platform.async_setup_entry(hass, entry, entities.extend)
-    assert len(entities) == 9
-    assert len({entity.unique_id for entity in entities}) == 9
+    assert len(entities) == 10
+    assert len({entity.unique_id for entity in entities}) == 10
     assert all(entity.coordinator is coordinator for entity in entities)
     assert len({tuple(entity.device_info["identifiers"]) for entity in entities}) == 1
     coordinator.nr10e = False
@@ -342,6 +342,10 @@ async def test_default_controls_visible_and_explicit_disables_preserved(
         entity for entity in entities if entity.unique_id.endswith("-hot_water_level")
     ]
     assert bool(hot_water) is expected_nr10e
+    assert (
+        any(isinstance(entity, BcmOperationMode) for entity in entities)
+        is expected_presets
+    )
     assert (
         bool(boiler.supported_features & ClimateEntityFeature.PRESET_MODE)
         is expected_presets
@@ -438,3 +442,94 @@ async def test_stop_sequence_after_failed_power_on(setup):
     with pytest.raises(HomeAssistantError):
         await climate.async_set_hvac_mode(HVACMode.HEAT)
     assert device.writes == [(POWER, 1)]
+
+
+@pytest.mark.asyncio
+async def test_power_switch_and_climate_share_state_and_preserve_settings(setup):
+    _, _, coordinator, device, boiler = setup
+    power = BcmPower(coordinator, "power", "전원")
+    before = device.regs[1:].copy()
+    assert power.unique_id == "BCM-00:11:22:33:44:55-power"
+    await power.async_turn_off()
+    assert power.is_on is False and boiler.hvac_mode == HVACMode.OFF
+    await boiler.async_turn_on()
+    assert power.is_on is True and boiler.hvac_mode == HVACMode.HEAT
+    await power.async_turn_on()
+    assert device.writes == [(POWER, 0), (POWER, 1), (POWER, 1)]
+    assert device.regs[1:] == before
+    device.regs[POWER] = 0  # App change appears on the shared poll.
+    await coordinator.async_refresh()
+    assert power.is_on is False and boiler.hvac_mode == HVACMode.OFF
+    device.regs[POWER] = 9
+    await coordinator.async_refresh()
+    assert power.is_on is None
+
+
+@pytest.mark.asyncio
+async def test_operation_select_and_climate_share_preset_and_preserve_settings(setup):
+    _, _, coordinator, device, boiler = setup
+    coordinator.preset_control = True
+    mode = BcmOperationMode(coordinator, "operation_mode", "운전모드")
+    assert mode.unique_id == "BCM-00:11:22:33:44:55-operation_mode"
+    assert mode.options == ["실내", "온돌", "온수"]
+    device.regs[POWER] = 0
+    device.regs[AWAY] = device.regs[SCHEDULE] = 1
+    before = device.regs.copy()
+    for option in mode.options:
+        await mode.async_select_option(option)
+        assert mode.current_option == boiler.preset_mode == option
+    assert all(register == OPERATION_MODE for register, _ in device.writes)
+    assert device.regs[:4] == before[:4]
+    assert device.regs[5:] == before[5:]
+    await boiler.async_set_preset_mode("온돌")
+    assert mode.current_option == "온돌"
+    device.regs[OPERATION_MODE] = 3
+    await coordinator.async_refresh()
+    assert mode.current_option == boiler.preset_mode == "실내"
+    device.regs[OPERATION_MODE] = 0
+    await coordinator.async_refresh()
+    assert mode.current_option is None
+
+
+@pytest.mark.asyncio
+async def test_new_controls_readback_and_offline_behavior(setup):
+    _, _, coordinator, device, boiler = setup
+    coordinator.preset_control = True
+    power = BcmPower(coordinator, "power", "전원")
+    mode = BcmOperationMode(coordinator, "operation_mode", "운전모드")
+    device.apply_writes = False
+    await power.async_turn_off()
+    assert power.is_on is True and boiler.hvac_mode == HVACMode.HEAT
+    with pytest.raises(HomeAssistantError, match="반영하지 않았습니다"):
+        await mode.async_select_option("온돌")
+    assert mode.current_option == boiler.preset_mode == "실내"
+    device.writes.clear()
+    with pytest.raises(HomeAssistantError):
+        await mode.async_select_option("invalid")
+    device.regs[CONNECTIVITY] = 1
+    await coordinator.async_refresh()
+    assert not power.available and not mode.available
+    with pytest.raises(HomeAssistantError):
+        await power.async_turn_on()
+    with pytest.raises(HomeAssistantError):
+        await mode.async_select_option("온수")
+    assert device.writes == []
+    device.fail_read = True
+    await coordinator.async_refresh()
+    assert not power.available and not mode.available
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setup", [{}], indirect=True)
+async def test_default_platform_setup_includes_both_new_controls_without_commands(
+    setup,
+):
+    hass, entry, coordinator, device, _ = setup
+    entities = []
+    for platform in (climate, select, switch, sensor, binary_sensor):
+        await platform.async_setup_entry(hass, entry, entities.extend)
+    assert len(entities) == len({entity.unique_id for entity in entities}) == 11
+    assert sum(isinstance(entity, BcmPower) for entity in entities) == 1
+    assert sum(isinstance(entity, BcmOperationMode) for entity in entities) == 1
+    assert all(entity.coordinator is coordinator for entity in entities)
+    assert device.writes == []

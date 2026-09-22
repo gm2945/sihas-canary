@@ -23,7 +23,7 @@ from .const import (
 from .packet_builder import packet_builder
 from .sender import send
 from .sihas_base import SihasEntity
-from .bcm import BcmEntity, SCHEDULE
+from .bcm import BcmEntity, POWER, SCHEDULE
 from .const import DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=5)
@@ -43,7 +43,13 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     if entry.data[CONF_TYPE] == "BCM":
-        async_add_entities([BcmSchedule(hass.data[DOMAIN][entry.entry_id], "schedule", "예약")])
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        async_add_entities(
+            [
+                BcmPower(coordinator, "power", "전원"),
+                BcmSchedule(coordinator, "schedule", "예약"),
+            ]
+        )
     elif entry.data[CONF_TYPE] == "CCM":
         async_add_entities(
             [
@@ -97,6 +103,21 @@ class Ccm300(SihasEntity, SwitchEntity):
             self._attributes[SensorDeviceClass.POWER] = round(regs[CCM_REG_CUR_W] * 0.1, 3)
             self._attributes[SensorDeviceClass.POWER_FACTOR] = round(regs[CCM_REG_CUR_PF] * 0.1, 3)
 
+
+class BcmPower(BcmEntity, SwitchEntity):
+    """Expose the same power register used by the climate entity."""
+
+    _attr_icon = "mdi:power"
+
+    @property
+    def is_on(self):
+        return {0: False, 1: True}.get(self.registers[POWER])
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_write(POWER, 1)
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_write(POWER, 0)
 
 
 class BcmSchedule(BcmEntity, SwitchEntity):

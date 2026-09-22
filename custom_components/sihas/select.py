@@ -2,7 +2,7 @@
 
 from homeassistant.components.select import SelectEntity
 
-from .bcm import AWAY, HOT_WATER_TARGET, BcmEntity
+from .bcm import AWAY, HOT_WATER_TARGET, PRESET_MODES, BcmEntity, operation_mode
 from .const import CONF_TYPE, DOMAIN
 
 
@@ -13,6 +13,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         BcmSelect(coordinator, "occupancy_mode", "외출 모드", AWAY, ["재실", "외출"])
     ]
+    if coordinator.preset_control:
+        entities.append(BcmOperationMode(coordinator, "operation_mode", "운전모드"))
     if coordinator.nr10e:
         entities.append(
             BcmSelect(
@@ -24,6 +26,20 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
     async_add_entities(entities)
+
+
+class BcmOperationMode(BcmEntity, SelectEntity):
+    """Share the climate preset's decoding, validation and readback."""
+
+    _attr_icon = "mdi:format-list-bulleted"
+    _attr_options = list(PRESET_MODES)
+
+    @property
+    def current_option(self):
+        return operation_mode(self.registers)
+
+    async def async_select_option(self, option):
+        await self.coordinator.async_set_preset(option)
 
 
 class BcmSelect(BcmEntity, SelectEntity):
