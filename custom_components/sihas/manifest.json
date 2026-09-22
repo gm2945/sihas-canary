@@ -2,7 +2,7 @@
   "domain": "sihas",
   "name": "sihas",
   "config_flow": true,
-  "documentation": "https://github.com/gm2945/sihas-canary/blob/v1.7.13/custom_components/sihas/docs/BCM300.md",
+  "documentation": "https://github.com/gm2945/sihas-canary/blob/v1.7.14/custom_components/sihas/docs/BCM300.md",
   "zeroconf": [
     "_sihas._tcp.local."
   ],
@@ -24,6 +24,6 @@
     "@cmsong-shina"
   ],
   "iot_class": "local_polling",
-  "version": "1.7.13",
+  "version": "1.7.14",
   "issue_tracker": "https://github.com/cmsong-shina/sihas-canary/issues"
 }

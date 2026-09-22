@@ -17,6 +17,7 @@ PLATFORMS: list[str] = [
     "climate",
     "cover",
     "light",
+    "number",
     "sensor",
     "select",
     "switch",
@@ -45,4 +46,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def _async_options_updated(hass, entry):
     await hass.config_entries.async_reload(entry.entry_id)
-

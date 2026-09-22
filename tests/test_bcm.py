@@ -37,7 +37,16 @@ from custom_components.sihas.binary_sensor import BcmStatus
 from custom_components.sihas.sensor import BcmWaterStatus
 from custom_components.sihas.select import BcmOperationMode, BcmSelect
 from custom_components.sihas.switch import BcmPower, BcmSchedule
-from custom_components.sihas import binary_sensor, climate, select, sensor, switch
+from custom_components.sihas import (
+    PLATFORMS,
+    binary_sensor,
+    climate,
+    number,
+    select,
+    sensor,
+    switch,
+)
+from custom_components.sihas.number import BcmTargetTemperature
 from custom_components.sihas.diagnostics import async_get_config_entry_diagnostics
 from custom_components.sihas.config_flow import ConfigFlow
 
@@ -277,10 +286,10 @@ async def test_undocumented_writes_blocked_before_any_command(setup):
 async def test_platform_setup_shared_snapshot_and_profile_gate(setup):
     hass, entry, coordinator, device, _ = setup
     entities = []
-    for platform in (climate, select, switch, sensor, binary_sensor):
+    for platform in (climate, select, switch, number, sensor, binary_sensor):
         await platform.async_setup_entry(hass, entry, entities.extend)
-    assert len(entities) == 10
-    assert len({entity.unique_id for entity in entities}) == 10
+    assert len(entities) == 12
+    assert len({entity.unique_id for entity in entities}) == 12
     assert all(entity.coordinator is coordinator for entity in entities)
     assert len({tuple(entity.device_info["identifiers"]) for entity in entities}) == 1
     coordinator.nr10e = False
@@ -526,10 +535,152 @@ async def test_default_platform_setup_includes_both_new_controls_without_command
 ):
     hass, entry, coordinator, device, _ = setup
     entities = []
-    for platform in (climate, select, switch, sensor, binary_sensor):
+    for platform in (climate, select, switch, number, sensor, binary_sensor):
         await platform.async_setup_entry(hass, entry, entities.extend)
-    assert len(entities) == len({entity.unique_id for entity in entities}) == 11
+    assert len(entities) == len({entity.unique_id for entity in entities}) == 13
     assert sum(isinstance(entity, BcmPower) for entity in entities) == 1
     assert sum(isinstance(entity, BcmOperationMode) for entity in entities) == 1
     assert all(entity.coordinator is coordinator for entity in entities)
     assert device.writes == []
+
+
+@pytest.mark.asyncio
+async def test_temperature_number_setup_and_climate_state_sync(setup):
+    hass, entry, coordinator, device, boiler = setup
+    assert "number" in PLATFORMS
+    entities = []
+    await number.async_setup_entry(hass, entry, entities.extend)
+    room, ondol = entities
+    assert room.unique_id == "BCM-00:11:22:33:44:55-room_target_temperature"
+    assert ondol.unique_id == "BCM-00:11:22:33:44:55-ondol_target_temperature"
+    assert (room.native_min_value, room.native_max_value, room.native_step) == (
+        10,
+        40,
+        1,
+    )
+    assert (ondol.native_min_value, ondol.native_max_value, ondol.native_step) == (
+        40,
+        80,
+        1,
+    )
+    assert room.native_unit_of_measurement == ondol.native_unit_of_measurement == "°C"
+    assert device.writes == []
+    await room.async_set_native_value(25)
+    assert room.native_value == boiler.target_temperature == 25
+    await boiler.async_set_temperature(temperature=26)
+    assert room.native_value == 26
+    device.regs[OPERATION_MODE] = 7
+    await coordinator.async_refresh()
+    await ondol.async_set_native_value(55)
+    assert ondol.native_value == boiler.target_temperature == 55
+    device.regs[ROOM_TARGET] = 23
+    device.regs[ONDOL_TARGET] = 60
+    await coordinator.async_refresh()
+    assert room.native_value == 23 and ondol.native_value == 60
+    assert boiler.target_temperature == 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("power,raw_mode", [(0, 1), (1, 1), (1, 3), (1, 7)])
+async def test_temperature_numbers_preserve_power_preset_and_other_registers(
+    setup, power, raw_mode
+):
+    _, _, coordinator, device, _ = setup
+    device.regs[POWER] = power
+    device.regs[OPERATION_MODE] = raw_mode
+    device.regs[AWAY] = device.regs[SCHEDULE] = 1
+    before = device.regs.copy()
+    room = BcmTargetTemperature(
+        coordinator, "room_target_temperature", "실내 설정온도", ROOM_TARGET
+    )
+    ondol = BcmTargetTemperature(
+        coordinator, "ondol_target_temperature", "온돌 설정온도", ONDOL_TARGET
+    )
+    # Both explicitly named setpoints are writable regardless of the active preset.
+    await room.async_set_native_value(24)
+    await ondol.async_set_native_value(52)
+    expected = before.copy()
+    expected[ROOM_TARGET], expected[ONDOL_TARGET] = 24, 52
+    assert device.regs == expected
+    assert device.writes == [(ROOM_TARGET, 24), (ONDOL_TARGET, 52)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "register,value",
+    [
+        (ROOM_TARGET, 9),
+        (ROOM_TARGET, 41),
+        (ONDOL_TARGET, 39),
+        (ONDOL_TARGET, 81),
+        (ROOM_TARGET, 22.5),
+        (ROOM_TARGET, float("nan")),
+        (ONDOL_TARGET, float("inf")),
+        (ROOM_TARGET, "invalid"),
+        (ONDOL_TARGET, None),
+    ],
+)
+async def test_temperature_number_rejects_invalid_values_without_writes(
+    setup, register, value
+):
+    _, _, coordinator, device, _ = setup
+    entity = BcmTargetTemperature(coordinator, "test_target", "설정온도", register)
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(value)
+    assert device.writes == []
+
+
+@pytest.mark.asyncio
+async def test_temperature_number_readback_failure_and_offline(setup):
+    _, _, coordinator, device, _ = setup
+    room = BcmTargetTemperature(
+        coordinator, "room_target_temperature", "실내 설정온도", ROOM_TARGET
+    )
+    device.apply_writes = False
+    await room.async_set_native_value(25)
+    assert room.native_value == 22
+    device.fail_write = True
+    with pytest.raises(HomeAssistantError):
+        await room.async_set_native_value(26)
+    assert not room.available
+    device.fail_write = False
+    device.regs[CONNECTIVITY] = 1
+    await coordinator.async_refresh()
+    device.writes.clear()
+    with pytest.raises(HomeAssistantError):
+        await room.async_set_native_value(25)
+    assert not room.available and device.writes == []
+    device.regs[CONNECTIVITY] = 0
+    device.regs[ROOM_TARGET] = 65535
+    await coordinator.async_refresh()
+    assert room.available and room.native_value is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setup", [{CONF_BCM_NR10E: False}], indirect=True)
+async def test_generic_temperature_number_ranges_and_boundaries(setup):
+    hass, entry, _, device, _ = setup
+    entities = []
+    await number.async_setup_entry(hass, entry, entities.extend)
+    for entity in entities:
+        assert (entity.native_min_value, entity.native_max_value) == (0, 80)
+        for value in (0, 80):
+            await entity.async_set_native_value(value)
+            assert entity.native_value == value
+    assert device.writes == [
+        (ROOM_TARGET, 0),
+        (ROOM_TARGET, 80),
+        (ONDOL_TARGET, 0),
+        (ONDOL_TARGET, 80),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_number_platform_ignores_other_device_types():
+    from types import SimpleNamespace
+
+    entities = []
+    await number.async_setup_entry(
+        None, SimpleNamespace(data={"type": "CCM"}), entities.extend
+    )
+    assert entities == []
